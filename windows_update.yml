@@ -1,0 +1,60 @@
+- hosts: all
+  gather_facts: yes
+
+  tasks:
+
+     - name: Installing necessary Windows updates.
+       win_updates:
+           category_names:
+             - SecurityUpdates
+             - CriticalUpdates
+             - UpdateRollups
+           reboot: yes
+       register: result
+       failed_when:
+           - result.failed is defined
+           - result.failed
+
+     - block:
+
+          - name: Restartiing windows to try installation if it fails.
+            win_reboot:
+                  shutdown_timeout_sec: 3600
+                  reboot_timeout_sec: 3600
+            when:
+               - result.error is defined
+               - result.error == "A reboot is required before more updates can be installed."
+
+          - name: Retry windows Updates
+            win_updates:
+                category_names:
+                  - SecurityUpdates
+                  - CriticalUpdates
+                  - UpdateRollups
+            register: result
+
+       when:
+         - result.failed is defined
+         - result.failed
+
+     - name: Reboot when updates installed.
+       win_reboot:
+            shutdown_timeout_sec: 3600
+            reboot_timeout_sec: 3600
+       when:
+         - result.reboot_required is defined
+         - result.reboot_required
+       register: reboot_status
+
+     - name: Windows update summary.
+       debug:
+          msg: |
+            {{ result.installed_update_count }} updates were installed on {{ inventory_hostname }}.
+            The updates installed were:
+            {% for key, value in result.updates.iteritems() %}
+            - {{ value.title }}
+            {% endfor %}
+            {{ result.failed_update_count }} updates failed to install.
+            It took {{ reboot_status.elapsed / 60 }} minutes for the machine to reboot.
+       when:
+          - result.changed
